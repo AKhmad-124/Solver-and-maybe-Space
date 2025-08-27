@@ -1,10 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import time as pytime
+import serial
+import re
 
 
 #### Solver settings
-dt = 0.001
+dt = 0.003
 stop_time = 5
 start_time = 0 #start time
 step = 0
@@ -33,20 +35,25 @@ time = np.linspace(start_time,stop_time,total_steps+1)
 states = np.zeros((total_steps+1,2))
 states[0] = [V0,d0]#v,x
 ####
+#### Serial Set-up
+ser = serial.Serial('COM6',115200,timeout=1)
+pytime.sleep(2)#allows the arduino to restart
+ser.reset_input_buffer()
+print('Serial OK')
+
 ####
 
 
-
-def controller(Vsp,Vcurr,dt):
-    global ErrPrev , ErrInt , ErrDiff_prev
-    Err = Vsp - Vcurr
-    # ErrDiff = (Err-ErrPrev)/dt
-    alpha = N*dt / (1 + N*dt)   
-    ErrDiff = alpha*((Err - ErrPrev)/dt) + (1-alpha)*ErrDiff_prev
-    ErrInt = ErrInt + Err*dt
-    force = kp*Err + ki*ErrInt + kd*ErrDiff 
-    ErrPrev = Err
-
+def controllerArdu(Vcurr):
+    Vcurr1 = f"{round(Vcurr,3)}\n"
+    ser.write(Vcurr1.encode('utf-8'))
+    while ser.in_waiting <= 0:
+        1# time.sleep(0.000000001)
+    response = ser.readline().decode('utf-8').strip("\n")
+    float_list = [float(x) for x in re.findall(r'[-+]?\d*\.\d+', response)]    
+    force = float_list[0]
+    # print(round(Vcurr,3),force)
+    # force = 2
     return force
 
 def f(t,y):
@@ -69,18 +76,28 @@ def RK4Solver(f,y,h,t):
 start_timer = pytime.time()
 
 ################ main loop
-while(step+1 <= total_steps):
-    force = controller(Vsp,states[step,0],dt)
-    states[step+1] = RK4Solver(f,states[step],dt,time[step])
-    step+=1
-
+try:
+    while(step+1 <= total_steps):
+        force = controllerArdu(states[step,0])
+        states[step+1] = RK4Solver(f,states[step],dt,time[step])
+        # print(time[step],force,states[step,0])
+        step+=1
+except KeyboardInterrupt:
+    ser.close()
+    print("Closed Serial Communication")    
 ########
+##### HIL finishing and analysis
+ser.close()
+print("Closed Serial Communication")    
+end_time=pytime.time()-start_timer
+print(f"took {end_time}")
+# print(f"expected time{counter*0.01}")
+print(f"frequancy: {(total_steps)/end_time} ,  dt:{end_time/(total_steps)}")
+
 
 v = states[:,0]
 x = states[:,1]
 
-print("here")
-print("--- %s seconds ---" % (pytime.time() - start_timer))
 
 
 plt.figure(figsize=(15,8))
@@ -99,14 +116,14 @@ plt.grid(True)
 plt.xlim(0,stop_time)
 # plt.ylim(np.min(Verr)-5,np.max(v)+5)
 
-plt.figure(figsize=(15,8))
-plt.plot(time, x, label="d ")
+# plt.figure(figsize=(15,8))
+# plt.plot(time, x, label="d ")
 
-plt.xlabel("Time [s]")
-plt.ylabel("Value")
-plt.title("distance VS Time")
-plt.legend()
-plt.grid(True)
+# plt.xlabel("Time [s]")
+# plt.ylabel("Value")
+# plt.title("distance VS Time")
+# plt.legend()
+# plt.grid(True)
 plt.show()
 
 
